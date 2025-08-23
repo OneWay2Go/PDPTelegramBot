@@ -10,7 +10,7 @@ class Program
 {
     private static TelegramBotClient bot;
     private static HashSet<long> GroupIds = new();
-    private const string GroupsFile = "D:\\C#Projects\\PDPTelegramBot\\PDPTelegramSupportBot\\groups.txt";
+    private const string GroupsFile = "groups.txt";
 
     // ждём сообщение после /send
     private static HashSet<long> WaitingUsers = new();
