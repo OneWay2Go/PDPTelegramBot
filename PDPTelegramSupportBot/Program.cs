@@ -13,12 +13,12 @@ class Program
     private const string GroupsFile = "groups.txt";
 
     private static HashSet<long> WaitingUsers = new();
-    private static Dictionary<long, string> PendingMessages = new();
+    private static Dictionary<long, PendingMessage> PendingMessages = new();
     private static Dictionary<long, HashSet<long>> PendingSelections = new();
 
     static async Task Main()
     {
-        string token = "8323212364:AAGHCnLcLrP5pv91PoGkiwkrHi5aQlsZFes"; 
+        string token = "TELEGRAM_BOT_TOKEN";
         bot = new TelegramBotClient(token);
 
         LoadGroupsFromFile();
@@ -46,10 +46,10 @@ class Program
             var cq = update.CallbackQuery!;
             long userId = cq.From.Id;
 
-            if (cq.Data == "confirm" && PendingMessages.TryGetValue(userId, out var text))
+            if (cq.Data == "confirm" && PendingMessages.ContainsKey(userId))
             {
                 PendingSelections[userId] = new();
-                await ShowGroupSelection(userId, text, cancellationToken);
+                await ShowGroupSelection(userId, PendingMessages[userId], cancellationToken);
             }
             else if (cq.Data == "cancel")
             {
@@ -60,7 +60,7 @@ class Program
             }
             else if (cq.Data.StartsWith("toggle_"))
             {
-                if (PendingMessages.TryGetValue(userId, out var text1))
+                if (PendingMessages.ContainsKey(userId))
                 {
                     long gid = long.Parse(cq.Data.Split("_")[1]);
                     if (!PendingSelections.ContainsKey(userId))
@@ -71,12 +71,12 @@ class Program
                     else
                         PendingSelections[userId].Add(gid);
 
-                    await ShowGroupSelection(userId, text1, cancellationToken);
+                    await ShowGroupSelection(userId, PendingMessages[userId], cancellationToken);
                 }
             }
             else if (cq.Data == "send_selected")
             {
-                if (PendingMessages.TryGetValue(userId, out var text1))
+                if (PendingMessages.TryGetValue(userId, out var msg))
                 {
                     var selected = PendingSelections.ContainsKey(userId) ? PendingSelections[userId] : new();
                     var targets = selected.Count > 0 ? selected : GroupIds;
@@ -91,7 +91,7 @@ class Program
                             var memberInfo = await bot.GetChatMember(groupId, me.Id, cancellationToken);
                             if (memberInfo.Status is ChatMemberStatus.Administrator or ChatMemberStatus.Creator)
                             {
-                                await bot.SendMessage(groupId, text1, cancellationToken: cancellationToken);
+                                await SendPendingMessage(groupId, msg, cancellationToken);
                             }
                             else
                             {
@@ -116,7 +116,7 @@ class Program
             }
             else if (cq.Data == "send_all")
             {
-                if (PendingMessages.TryGetValue(userId, out var text1))
+                if (PendingMessages.TryGetValue(userId, out var msg))
                 {
                     List<long> toRemove = new();
                     foreach (var groupId in GroupIds.ToList())
@@ -125,7 +125,7 @@ class Program
                         {
                             var memberInfo = await bot.GetChatMember(groupId, me.Id, cancellationToken);
                             if (memberInfo.Status is ChatMemberStatus.Administrator or ChatMemberStatus.Creator)
-                                await bot.SendMessage(groupId, text1, cancellationToken: cancellationToken);
+                                await SendPendingMessage(groupId, msg, cancellationToken);
                             else
                                 toRemove.Add(groupId);
                         }
@@ -167,11 +167,11 @@ class Program
             return;
         }
 
-        if (message.Chat.Type == ChatType.Private && message.Text != null)
+        if (message.Chat.Type == ChatType.Private)
         {
             long userId = message.From?.Id ?? message.Chat.Id;
 
-            if (message.Text.StartsWith("/start", StringComparison.OrdinalIgnoreCase))
+            if (message.Text?.StartsWith("/start", StringComparison.OrdinalIgnoreCase) == true)
             {
                 var sb = new StringBuilder();
                 sb.AppendLine("👋 Привет! Я бот для рассылки сообщений в группы.");
@@ -185,7 +185,7 @@ class Program
                 return;
             }
 
-            if (message.Text.StartsWith("/groups", StringComparison.OrdinalIgnoreCase))
+            if (message.Text?.StartsWith("/groups", StringComparison.OrdinalIgnoreCase) == true)
             {
                 if (GroupIds.Count == 0)
                 {
@@ -212,17 +212,43 @@ class Program
                 return;
             }
 
-            if (message.Text.StartsWith("/send", StringComparison.OrdinalIgnoreCase))
+            if (message.Text?.StartsWith("/send", StringComparison.OrdinalIgnoreCase) == true)
             {
                 WaitingUsers.Add(userId);
-                await bot.SendMessage(message.Chat.Id, "✍️ Отправь сообщение для рассылки.", cancellationToken: cancellationToken);
+                await bot.SendMessage(message.Chat.Id, "✍️ Отправь сообщение или фото/документ для рассылки.", cancellationToken: cancellationToken);
                 return;
             }
 
             if (WaitingUsers.Contains(userId))
             {
                 WaitingUsers.Remove(userId);
-                PendingMessages[userId] = message.Text;
+
+                if (message.Photo != null && message.Photo.Any())
+                {
+                    var photo = message.Photo.Last();
+                    PendingMessages[userId] = new PendingMessage
+                    {
+                        Text = message.Caption,
+                        FileId = photo.FileId,
+                        IsPhoto = true
+                    };
+                }
+                else if (message.Document != null)
+                {
+                    PendingMessages[userId] = new PendingMessage
+                    {
+                        Text = message.Caption,
+                        FileId = message.Document.FileId,
+                        IsDocument = true
+                    };
+                }
+                else if (!string.IsNullOrEmpty(message.Text))
+                {
+                    PendingMessages[userId] = new PendingMessage
+                    {
+                        Text = message.Text
+                    };
+                }
 
                 var buttons = new InlineKeyboardMarkup(new[]
                 {
@@ -235,7 +261,7 @@ class Program
 
                 await bot.SendMessage(
                     message.Chat.Id,
-                    $"Вы хотите подготовить это сообщение к рассылке?\n\n\"{message.Text}\"",
+                    $"Вы хотите подготовить это сообщение к рассылке?",
                     replyMarkup: buttons,
                     cancellationToken: cancellationToken
                 );
@@ -243,7 +269,7 @@ class Program
         }
     }
 
-    static async Task ShowGroupSelection(long userId, string text, CancellationToken cancellationToken)
+    static async Task ShowGroupSelection(long userId, PendingMessage msg, CancellationToken cancellationToken)
     {
         var buttons = new List<List<InlineKeyboardButton>>();
         foreach (var gid in GroupIds)
@@ -278,9 +304,25 @@ class Program
         });
 
         await bot.SendMessage(userId,
-            $"Выберите группы для рассылки:\n\n\"{text}\"",
+            $"Выберите группы для рассылки:\n\n{(msg.Text ?? "(без текста)")}",
             replyMarkup: new InlineKeyboardMarkup(buttons),
             cancellationToken: cancellationToken);
+    }
+
+    static async Task SendPendingMessage(long chatId, PendingMessage msg, CancellationToken cancellationToken)
+    {
+        if (msg.IsPhoto)
+        {
+            await bot.SendPhoto(chatId, new InputFileId(msg.FileId!), caption: msg.Text, cancellationToken: cancellationToken);
+        }
+        else if (msg.IsDocument)
+        {
+            await bot.SendDocument(chatId, new InputFileId(msg.FileId!), caption: msg.Text, cancellationToken: cancellationToken);
+        }
+        else
+        {
+            await bot.SendMessage(chatId, msg.Text ?? "", cancellationToken: cancellationToken);
+        }
     }
 
     static Task HandleErrorAsync(ITelegramBotClient botClient, System.Exception exception, CancellationToken cancellationToken)
@@ -326,3 +368,10 @@ class Program
     }
 }
 
+class PendingMessage
+{
+    public string? Text { get; set; }
+    public string? FileId { get; set; }
+    public bool IsPhoto { get; set; }
+    public bool IsDocument { get; set; }
+}
