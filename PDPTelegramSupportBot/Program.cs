@@ -18,7 +18,7 @@ class Program
 
     static async Task Main()
     {
-        string token = "YOUR_TOKEN"; 
+        string token = "8323212364:AAGHCnLcLrP5pv91PoGkiwkrHi5aQlsZFes"; 
         bot = new TelegramBotClient(token);
 
         LoadGroupsFromFile();
@@ -84,6 +84,8 @@ class Program
                     List<long> toRemove = new();
                     foreach (var groupId in targets.ToList())
                     {
+                        var chat = await bot.GetChat(groupId, cancellationToken);
+                        var title = chat.Title ?? "(без названия)";
                         try
                         {
                             var memberInfo = await bot.GetChatMember(groupId, me.Id, cancellationToken);
@@ -93,13 +95,13 @@ class Program
                             }
                             else
                             {
-                                Console.WriteLine($"⚠ Бот больше не админ в {groupId}, удаляю.");
+                                Console.WriteLine($"⚠ Бот больше не админ в {title + "(id - " + groupId + ")"}, удаляю.");
                                 toRemove.Add(groupId);
                             }
                         }
                         catch
                         {
-                            Console.WriteLine($"❌ Ошибка при отправке в {groupId}, удаляю.");
+                            Console.WriteLine($"❌ Ошибка при отправке в {title + "(id - " + groupId + ")"}, удаляю.");
                             toRemove.Add(groupId);
                         }
                     }
