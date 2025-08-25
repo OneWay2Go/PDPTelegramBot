@@ -10,18 +10,15 @@ class Program
 {
     private static TelegramBotClient bot;
     private static HashSet<long> GroupIds = new();
-    private const string GroupsFile = "D:\\C#Projects\\PDPTelegramBot\\PDPTelegramSupportBot\\groups.txt";
+    private const string GroupsFile = "groups.txt";
 
-    // ждём сообщение после /send
     private static HashSet<long> WaitingUsers = new();
-    // храним неподтверждённые сообщения
     private static Dictionary<long, string> PendingMessages = new();
-    // храним выбранные группы
     private static Dictionary<long, HashSet<long>> PendingSelections = new();
 
     static async Task Main()
     {
-        string token = "8323212364:AAGHCnLcLrP5pv91PoGkiwkrHi5aQlsZFes"; // <-- вставь токен
+        string token = "YOUR_TOKEN"; 
         bot = new TelegramBotClient(token);
 
         LoadGroupsFromFile();
@@ -29,7 +26,6 @@ class Program
         var me = await bot.GetMe();
         Console.WriteLine($"Бот запущен: @{me.Username}");
 
-        // 📌 Регистрируем команды для меню бота
         await bot.SetMyCommands(new[]
         {
             new BotCommand { Command = "start", Description = "Запустить бота / показать меню" },
@@ -45,16 +41,13 @@ class Program
     {
         var me = await bot.GetMe();
 
-        // --- если это callback от кнопки ---
         if (update.Type == UpdateType.CallbackQuery)
         {
             var cq = update.CallbackQuery!;
             long userId = cq.From.Id;
 
-            // подтверждение рассылки
             if (cq.Data == "confirm" && PendingMessages.TryGetValue(userId, out var text))
             {
-                // предложим выбрать группы
                 PendingSelections[userId] = new();
                 await ShowGroupSelection(userId, text, cancellationToken);
             }
@@ -65,7 +58,7 @@ class Program
                 WaitingUsers.Remove(userId);
                 await bot.SendMessage(userId, "❌ Рассылка отменена.", cancellationToken: cancellationToken);
             }
-            else if (cq.Data.StartsWith("toggle_")) // выбор группы
+            else if (cq.Data.StartsWith("toggle_"))
             {
                 if (PendingMessages.TryGetValue(userId, out var text1))
                 {
@@ -86,7 +79,7 @@ class Program
                 if (PendingMessages.TryGetValue(userId, out var text1))
                 {
                     var selected = PendingSelections.ContainsKey(userId) ? PendingSelections[userId] : new();
-                    var targets = selected.Count > 0 ? selected : GroupIds; // если не выбрал — все
+                    var targets = selected.Count > 0 ? selected : GroupIds;
 
                     List<long> toRemove = new();
                     foreach (var groupId in targets.ToList())
@@ -153,12 +146,10 @@ class Program
             return;
         }
 
-        // --- если это сообщение ---
         if (update.Type != UpdateType.Message) return;
         var message = update.Message;
         if (message == null) return;
 
-        // 1) Бота добавили в группу
         if (message.NewChatMembers != null)
         {
             foreach (var member in message.NewChatMembers)
@@ -167,7 +158,6 @@ class Program
                 {
                     Console.WriteLine($"Бота добавили в группу: {message.Chat.Title} ({message.Chat.Id})");
 
-                    // Сохраняем группу всегда, даже если бот пока не админ
                     AddGroup(message.Chat.Id);
                     await bot.SendMessage(message.Chat.Id, "✅ Я добавлен в список групп. Дайте мне админку, чтобы я мог отправлять рассылку.");
                 }
@@ -175,7 +165,6 @@ class Program
             return;
         }
 
-        // 2) Команды/сообщения в личке
         if (message.Chat.Type == ChatType.Private && message.Text != null)
         {
             long userId = message.From?.Id ?? message.Chat.Id;
@@ -228,7 +217,6 @@ class Program
                 return;
             }
 
-            // Пользователь прислал сообщение после /send
             if (WaitingUsers.Contains(userId))
             {
                 WaitingUsers.Remove(userId);
@@ -299,7 +287,6 @@ class Program
         return Task.CompletedTask;
     }
 
-    // --- Работа с группами ---
     static void AddGroup(long chatId)
     {
         if (GroupIds.Add(chatId))
